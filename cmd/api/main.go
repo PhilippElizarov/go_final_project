@@ -8,15 +8,11 @@ import (
 	"path/filepath"
 
 	"github.com/PhilippElizarov/go_final_project/internal/database"
+	"github.com/PhilippElizarov/go_final_project/internal/model"
+	"github.com/PhilippElizarov/go_final_project/internal/routes"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
-
-const dbName string = "scheduler.db"
-
-var dbFile string
-
-const timeTemplate = "20060102"
 
 func main() {
 
@@ -36,27 +32,27 @@ func main() {
 		appPath = dir
 	}
 
-	dbFile = filepath.Join(filepath.Dir(appPath), dbName)
+	model.DbFile = filepath.Join(filepath.Dir(appPath), model.DbName)
 
 	var install bool
-	_, err = os.Stat(dbFile)
+	_, err = os.Stat(model.DbFile)
 	if err != nil {
 		install = true
 	}
 
 	if install {
-		file, err := os.Create(dbFile)
+		file, err := os.Create(model.DbFile)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
 		file.Close()
 
-		sqliteDatabase, _ := sql.Open("sqlite3", dbFile)
+		sqliteDatabase, _ := sql.Open("sqlite3", model.DbFile)
 		defer sqliteDatabase.Close()
 		database.CreateTable(sqliteDatabase)
 	}
 
-	router := NewRouter()
+	router := routes.NewRouter()
 
 	port, exists := os.LookupEnv("TODO_PORT")
 	if !exists {

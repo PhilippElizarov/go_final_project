@@ -1,13 +1,13 @@
-FROM golang:1.21.0
+FROM golang:1.21.5
 
 WORKDIR /usr/src/app
 
 COPY . .
 
-RUN go mod tidy
+RUN go mod download
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /main cmd/api/main.go cmd/api/routes.go 
+RUN CGO_ENABLED=${CGO_ENABLED} GOOS=${GOOS} GOARCH=${GOARCH} go build -o main cmd/api/main.go
 
-EXPOSE 7540
+EXPOSE ${TODO_PORT}
 
-CMD ["/main"]
+CMD ["./main"]

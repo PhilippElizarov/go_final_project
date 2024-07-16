@@ -15,14 +15,11 @@ import (
 )
 
 func main() {
-
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(err.Error())
 	}
 
-	var dir string
-
-	appPath, err := os.Executable()
+	appPath, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -32,7 +29,9 @@ func main() {
 		appPath = dir
 	}
 
-	model.DbFile = filepath.Join(filepath.Dir(appPath), model.DbName)
+	const DbName string = "scheduler.db"
+
+	model.DbFile = filepath.Join(filepath.Dir(appPath), DbName)
 
 	var install bool
 	_, err = os.Stat(model.DbFile)
@@ -40,17 +39,19 @@ func main() {
 		install = true
 	}
 
+	sqliteDatabase, _ := sql.Open("sqlite3", model.DbFile)
+	defer sqliteDatabase.Close()
+
 	if install {
 		file, err := os.Create(model.DbFile)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
 		file.Close()
-
-		sqliteDatabase, _ := sql.Open("sqlite3", model.DbFile)
-		defer sqliteDatabase.Close()
 		database.CreateTable(sqliteDatabase)
 	}
+
+	database.TaskStorage = &database.TaskStore{Db: sqliteDatabase}
 
 	router := routes.NewRouter()
 
@@ -59,6 +60,7 @@ func main() {
 		port = "7540"
 	}
 
+	log.Printf("Приложение запущено на порту %s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatal(err.Error())
 	}

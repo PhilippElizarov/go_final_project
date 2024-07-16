@@ -21,8 +21,8 @@ func NewRouter() http.Handler {
 	r.Handle("/css/*", http.StripPrefix("/css/", http.FileServer(http.Dir("./web/css"))))
 
 	r.Get("/api/nextdate", handleNextDate)
-	r.Post("/api/task", handlePostTask)
-	r.Get("/api/tasks", handleGetTask)
+	r.Post("/api/task", handleAddTask)
+	r.Get("/api/tasks", handleGetTasks)
 	r.Get("/api/task", handleGetTaskByID)
 	r.Put("/api/task", handleUpdateTask)
 	r.Post("/api/task/done", handleDoneTask)
@@ -37,7 +37,7 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	id := r.URL.Query().Get("id")
 
-	err := database.DeleteTask(id)
+	err := database.TaskStorage.DeleteTask(id)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -55,7 +55,7 @@ func handleDoneTask(w http.ResponseWriter, r *http.Request) {
 
 	id := r.URL.Query().Get("id")
 
-	err := database.DoneTask(id)
+	err := database.TaskStorage.DoneTask(id)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -70,7 +70,7 @@ func handleDoneTask(w http.ResponseWriter, r *http.Request) {
 func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	var response model.Response
-	var scheduler model.Scheduler
+	var task model.Task
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	_, err := buf.ReadFrom(r.Body)
@@ -81,21 +81,21 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = json.Unmarshal(buf.Bytes(), &scheduler); err != nil {
+	if err = json.Unmarshal(buf.Bytes(), &task); err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if scheduler.ID == "" {
+	if task.ID == "" {
 		response.Error = "Задача не найдена"
 		json.NewEncoder(w).Encode(&response)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if scheduler.Title == "" {
+	if task.Title == "" {
 		response.Error = "Не указан заголовок задачи"
 		json.NewEncoder(w).Encode(&response)
 		w.WriteHeader(http.StatusBadRequest)
@@ -104,13 +104,13 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	dateNow := time.Now().Format(model.TimeTemplate)
 
-	if scheduler.Date == "" {
-		scheduler.Date = dateNow
+	if task.Date == "" {
+		task.Date = dateNow
 	}
 
 	var date_ time.Time
 
-	date_, err = time.Parse(model.TimeTemplate, scheduler.Date)
+	date_, err = time.Parse(model.TimeTemplate, task.Date)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -127,10 +127,10 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if date_.Compare(dateNow_) == -1 {
-		if scheduler.Repeat == "" {
-			scheduler.Date = dateNow_.Format(model.TimeTemplate)
+		if task.Repeat == "" {
+			task.Date = dateNow_.Format(model.TimeTemplate)
 		} else {
-			scheduler.Date, err = nextdate.NextDate(dateNow_, scheduler.Date, scheduler.Repeat)
+			task.Date, err = nextdate.NextDate(dateNow_, task.Date, task.Repeat)
 			if err != nil {
 				response.Error = err.Error()
 				json.NewEncoder(w).Encode(&response)
@@ -140,7 +140,7 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err = database.UpdateTask(scheduler)
+	err = database.TaskStorage.UpdateTask(task)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -155,10 +155,9 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 func handleGetTaskByID(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	var response model.Response
-	var scheduler model.Scheduler
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
-	scheduler, err := database.GetTaskByID(id)
+	task, err := database.TaskStorage.GetTaskByID(id)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -166,17 +165,17 @@ func handleGetTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(&scheduler)
+	json.NewEncoder(w).Encode(&task)
 	w.WriteHeader(http.StatusFound)
 }
 
-func handleGetTask(w http.ResponseWriter, r *http.Request) {
+func handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	var response model.Response
 	var tasks model.Tasks
 
 	search := r.URL.Query().Get("search")
 
-	tasks, response, err := database.GetTask(search)
+	tasks, err := database.TaskStorage.GetTasks(search)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -195,11 +194,11 @@ func handleGetTask(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write(resp)
+	_, _ = w.Write(resp)
 }
 
-func handlePostTask(w http.ResponseWriter, r *http.Request) {
-	var scheduler model.Scheduler
+func handleAddTask(w http.ResponseWriter, r *http.Request) {
+	var task model.Task
 	var buf bytes.Buffer
 	var response model.Response
 
@@ -213,14 +212,14 @@ func handlePostTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = json.Unmarshal(buf.Bytes(), &scheduler); err != nil {
+	if err = json.Unmarshal(buf.Bytes(), &task); err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if scheduler.Title == "" {
+	if task.Title == "" {
 		response.Error = "Не указан заголовок задачи"
 		json.NewEncoder(w).Encode(&response)
 		w.WriteHeader(http.StatusBadRequest)
@@ -229,13 +228,13 @@ func handlePostTask(w http.ResponseWriter, r *http.Request) {
 
 	dateNow := time.Now().Format(model.TimeTemplate)
 
-	if scheduler.Date == "" {
-		scheduler.Date = dateNow
+	if task.Date == "" {
+		task.Date = dateNow
 	}
 
 	var date_ time.Time
 
-	date_, err = time.Parse(model.TimeTemplate, scheduler.Date)
+	date_, err = time.Parse(model.TimeTemplate, task.Date)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -252,10 +251,10 @@ func handlePostTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if date_.Compare(dateNow_) == -1 { // || date_.Compare(dateNow_) == 0 {
-		if scheduler.Repeat == "" {
-			scheduler.Date = dateNow_.Format(model.TimeTemplate)
+		if task.Repeat == "" {
+			task.Date = dateNow_.Format(model.TimeTemplate)
 		} else {
-			scheduler.Date, err = nextdate.NextDate(dateNow_, scheduler.Date, scheduler.Repeat)
+			task.Date, err = nextdate.NextDate(dateNow_, task.Date, task.Repeat)
 			if err != nil {
 				response.Error = err.Error()
 				json.NewEncoder(w).Encode(&response)
@@ -265,7 +264,7 @@ func handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	response, err = database.PostTask(scheduler)
+	response, err = database.TaskStorage.AddTask(task)
 	if err != nil {
 		response.Error = err.Error()
 		json.NewEncoder(w).Encode(&response)
@@ -300,7 +299,7 @@ func handleNextDate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(nextDate))
+	_, _ = w.Write([]byte(nextDate))
 }

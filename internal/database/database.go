@@ -10,6 +10,14 @@ import (
 	"github.com/PhilippElizarov/go_final_project/internal/nextdate"
 )
 
+const limit = 50
+
+type TaskStore struct {
+	Db *sql.DB
+}
+
+var TaskStorage *TaskStore
+
 func CreateTable(db *sql.DB) {
 	createSchedulerTableSQL := `CREATE TABLE scheduler (
 		"id" integer NOT NULL PRIMARY KEY AUTOINCREMENT,	
@@ -27,20 +35,13 @@ func CreateTable(db *sql.DB) {
 	statement.Exec()
 }
 
-func DeleteTask(id string) error {
-	var scheduler model.Scheduler
-	db, err := sql.Open("sqlite3", model.DbFile)
+func (s TaskStore) DeleteTask(id string) error {
+	task, err := s.GetTaskByID(id)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 
-	row := db.QueryRow("SELECT * FROM scheduler WHERE id = :id", sql.Named("id", id))
-	err = row.Scan(&scheduler.ID, &scheduler.Date, &scheduler.Title, &scheduler.Comment, &scheduler.Repeat)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("DELETE FROM scheduler WHERE id = :id", sql.Named("id", scheduler.ID))
+	_, err = s.Db.Exec("DELETE FROM scheduler WHERE id = :id", sql.Named("id", task.ID))
 	if err != nil {
 		return err
 	}
@@ -48,16 +49,8 @@ func DeleteTask(id string) error {
 	return nil
 }
 
-func DoneTask(id string) error {
-	var scheduler model.Scheduler
-	db, err := sql.Open("sqlite3", model.DbFile)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	row := db.QueryRow("SELECT * FROM scheduler WHERE id = :id", sql.Named("id", id))
-	err = row.Scan(&scheduler.ID, &scheduler.Date, &scheduler.Title, &scheduler.Comment, &scheduler.Repeat)
+func (s TaskStore) DoneTask(id string) error {
+	task, err := s.GetTaskByID(id)
 	if err != nil {
 		return err
 	}
@@ -68,22 +61,22 @@ func DoneTask(id string) error {
 		return err
 	}
 
-	if scheduler.Repeat == "" {
-		_, err = db.Exec("DELETE FROM scheduler WHERE id = :id", sql.Named("id", scheduler.ID))
+	if task.Repeat == "" {
+		_, err = s.Db.Exec("DELETE FROM scheduler WHERE id = :id", sql.Named("id", task.ID))
 		if err != nil {
 			return err
 		}
 	} else {
-		scheduler.Date, err = nextdate.NextDate(dateNow_, scheduler.Date, scheduler.Repeat)
+		task.Date, err = nextdate.NextDate(dateNow_, task.Date, task.Repeat)
 		if err != nil {
 			return err
 		}
-		_, err = db.Exec("UPDATE scheduler SET date = :date, title = :title, comment = :comment, repeat = :repeat WHERE id = :id",
-			sql.Named("date", scheduler.Date),
-			sql.Named("title", scheduler.Title),
-			sql.Named("comment", scheduler.Comment),
-			sql.Named("repeat", scheduler.Repeat),
-			sql.Named("id", scheduler.ID))
+		_, err = s.Db.Exec("UPDATE scheduler SET date = :date, title = :title, comment = :comment, repeat = :repeat WHERE id = :id",
+			sql.Named("date", task.Date),
+			sql.Named("title", task.Title),
+			sql.Named("comment", task.Comment),
+			sql.Named("repeat", task.Repeat),
+			sql.Named("id", task.ID))
 		if err != nil {
 			return err
 		}
@@ -92,25 +85,18 @@ func DoneTask(id string) error {
 	return nil
 }
 
-func UpdateTask(scheduler model.Scheduler) error {
-	db, err := sql.Open("sqlite3", model.DbFile)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	row := db.QueryRow("SELECT id FROM scheduler WHERE id = :id", sql.Named("id", scheduler.ID))
-	err = row.Scan(&scheduler.ID)
+func (s TaskStore) UpdateTask(task model.Task) error {
+	_, err := s.GetTaskByID(task.ID)
 	if err != nil {
 		return err
 	}
 
-	_, err = db.Exec("UPDATE scheduler SET date = :date, title = :title, comment = :comment, repeat = :repeat WHERE id = :id",
-		sql.Named("date", scheduler.Date),
-		sql.Named("title", scheduler.Title),
-		sql.Named("comment", scheduler.Comment),
-		sql.Named("repeat", scheduler.Repeat),
-		sql.Named("id", scheduler.ID))
+	_, err = s.Db.Exec("UPDATE scheduler SET date = :date, title = :title, comment = :comment, repeat = :repeat WHERE id = :id",
+		sql.Named("date", task.Date),
+		sql.Named("title", task.Title),
+		sql.Named("comment", task.Comment),
+		sql.Named("repeat", task.Repeat),
+		sql.Named("id", task.ID))
 	if err != nil {
 		return err
 	}
@@ -118,38 +104,24 @@ func UpdateTask(scheduler model.Scheduler) error {
 	return nil
 }
 
-func GetTaskByID(id string) (model.Scheduler, error) {
-	var scheduler model.Scheduler
-
-	db, err := sql.Open("sqlite3", model.DbFile)
+func (s TaskStore) GetTaskByID(id string) (model.Task, error) {
+	var task model.Task
+	row := s.Db.QueryRow("SELECT * FROM scheduler WHERE id = :id", sql.Named("id", id))
+	err := row.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 	if err != nil {
-		return scheduler, err
-	}
-	defer db.Close()
-
-	row := db.QueryRow("SELECT * FROM scheduler WHERE id = :id", sql.Named("id", id))
-	err = row.Scan(&scheduler.ID, &scheduler.Date, &scheduler.Title, &scheduler.Comment, &scheduler.Repeat)
-	if err != nil {
-		return scheduler, err
+		return task, err
 	}
 
-	return scheduler, nil
+	return task, nil
 }
 
-func PostTask(scheduler model.Scheduler) (model.Response, error) {
+func (s TaskStore) AddTask(task model.Task) (model.Response, error) {
 	var response model.Response
-
-	db, err := sql.Open("sqlite3", model.DbFile)
-	if err != nil {
-		return response, err
-	}
-	defer db.Close()
-
-	res, err := db.Exec("INSERT INTO scheduler (date, title, comment, repeat) VALUES (:date, :title, :comment, :repeat)",
-		sql.Named("date", scheduler.Date),
-		sql.Named("title", scheduler.Title),
-		sql.Named("comment", scheduler.Comment),
-		sql.Named("repeat", scheduler.Repeat))
+	res, err := s.Db.Exec("INSERT INTO scheduler (date, title, comment, repeat) VALUES (:date, :title, :comment, :repeat)",
+		sql.Named("date", task.Date),
+		sql.Named("title", task.Title),
+		sql.Named("comment", task.Comment),
+		sql.Named("repeat", task.Repeat))
 	if err != nil {
 		return response, err
 	}
@@ -164,53 +136,49 @@ func PostTask(scheduler model.Scheduler) (model.Response, error) {
 	return response, nil
 }
 
-func GetTask(search string) (model.Tasks, model.Response, error) {
-	var scheduler model.Scheduler
-	var response model.Response
+func (s TaskStore) GetTasks(search string) (model.Tasks, error) {
+	var task model.Task
 	var tasks model.Tasks
 	var rows *sql.Rows
-
-	db, err := sql.Open("sqlite3", model.DbFile)
-	if err != nil {
-		return tasks, response, err
-	}
-	defer db.Close()
-
-	limit := 50
+	var err error
 
 	if search == "" {
-		rows, err = db.Query("SELECT * FROM scheduler ORDER BY date LIMIT :limit", sql.Named("limit", limit))
+		rows, err = s.Db.Query("SELECT * FROM scheduler ORDER BY date LIMIT :limit", sql.Named("limit", limit))
 		if err != nil {
-			return tasks, response, err
+			return tasks, err
 		}
 	} else {
 		date, err := time.Parse("02.01.2006", search)
 		if err != nil {
 			search = `%` + search + `%`
-			rows, err = db.Query("SELECT * FROM scheduler WHERE title LIKE :search OR comment LIKE :search ORDER BY date LIMIT :limit",
+			rows, err = s.Db.Query("SELECT * FROM scheduler WHERE title LIKE :search OR comment LIKE :search ORDER BY date LIMIT :limit",
 				sql.Named("search", search),
 				sql.Named("limit", limit))
 			if err != nil {
-				return tasks, response, err
+				return tasks, err
 			}
 		} else {
-			rows, err = db.Query("SELECT * FROM scheduler WHERE date = :date LIMIT :limit",
+			rows, err = s.Db.Query("SELECT * FROM scheduler WHERE date = :date LIMIT :limit",
 				sql.Named("date", date.Format(model.TimeTemplate)),
 				sql.Named("limit", limit))
 			if err != nil {
-				return tasks, response, err
+				return tasks, err
 			}
 		}
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rows.Scan(&scheduler.ID, &scheduler.Date, &scheduler.Title, &scheduler.Comment, &scheduler.Repeat)
+		err := rows.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 		if err != nil {
-			return tasks, response, err
+			return tasks, err
 		}
-		tasks.Tasks = append(tasks.Tasks, scheduler)
+		tasks.Tasks = append(tasks.Tasks, task)
 	}
 
-	return tasks, response, nil
+	if err := rows.Err(); err != nil {
+		return tasks, err
+	}
+
+	return tasks, nil
 }
